@@ -1,0 +1,7 @@
+usertrap()
+0x7 the number that mapped to syscall exec
+supervisor mode
+lw s2,0(zero)  s2
+the page of address 0 is not mapped. as the scause indicated: load pagefault;
+initcode 1
+
