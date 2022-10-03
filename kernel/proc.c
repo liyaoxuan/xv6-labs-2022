@@ -5,6 +5,7 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "sysinfo.h"
 
 struct cpu cpus[NCPU];
 
@@ -16,6 +17,7 @@ int nextpid = 1;
 struct spinlock pid_lock;
 
 extern void forkret(void);
+extern int getfreememsize(void);
 static void freeproc(struct proc *p);
 
 extern char trampoline[]; // trampoline.S
@@ -251,6 +253,8 @@ userinit(void)
 
   p->state = RUNNABLE;
 
+  p->tracemask = 0;
+
   release(&p->lock);
 }
 
@@ -296,6 +300,8 @@ fork(void)
   }
   np->sz = p->sz;
 
+  np->tracemask = p->tracemask;
+  
   // copy saved user registers.
   *(np->trapframe) = *(p->trapframe);
 
@@ -680,4 +686,24 @@ procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
+}
+
+int
+sysinfo(uint64 addr)
+{
+  struct sysinfo si;
+  struct proc *p;
+  int nproc;
+  nproc = 0;
+  for(p = proc; p < &proc[NPROC]; p++){
+    if(p->state == UNUSED)
+      continue;
+    nproc++;
+  }
+  si.freemem = getfreememsize();
+  si.nproc = nproc;
+  p = myproc();
+  if(copyout(p->pagetable, addr, (char *)&si, sizeof(si)) < 0)
+    return -1;
+  return 0;
 }
