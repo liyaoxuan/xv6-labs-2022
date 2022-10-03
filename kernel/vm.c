@@ -286,6 +286,37 @@ freewalk(pagetable_t pagetable)
   kfree((void*)pagetable);
 }
 
+static void
+vmprintline(pte_t pte, int level, int idx)
+{
+  for(int i = 0; i < level; i++)
+    printf(".. ");
+  printf("..%d: ", idx);
+  printf("pte %p pa %p\n", pte, PTE2PA(pte));
+}
+
+void
+vmprinthelper(pagetable_t pagetable, int level) 
+{
+  int i;
+  
+  for(i = 0; i < 512; i++){
+    pte_t pte = pagetable[i];
+    if((pte & PTE_V) && level <= 2){
+      vmprintline(pte, level, i);
+      uint64 child = PTE2PA(pte);
+      vmprinthelper((pagetable_t)child, level+1);
+    }
+  }
+}
+
+void
+vmprint(pagetable_t pagetable)
+{
+  printf("page table %p\n", pagetable);
+  vmprinthelper(pagetable, 0);
+}
+
 // Free user memory pages,
 // then free page-table pages.
 void
