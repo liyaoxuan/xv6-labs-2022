@@ -1,0 +1,6 @@
+1. arguments to functions are stored in ax registers. 13 is held in a2 in main's call to printf
+2. call to function f was optimized by compiler(call.asm:46); call to g is inline at call.asm:32-34
+3. call.asm:64a
+4. 0x38 (call of exit in main())
+5. HE110 World; 0x726c6400; no
+6. ?
