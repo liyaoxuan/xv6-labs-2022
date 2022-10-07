@@ -49,8 +49,9 @@ usertrap(void)
   
   // save user program counter.
   p->trapframe->epc = r_sepc();
-  
-  if(r_scause() == 8){
+
+  uint scause = r_scause();
+  if(scause == 8){
     // system call
 
     if(killed(p))
@@ -65,6 +66,14 @@ usertrap(void)
     intr_on();
 
     syscall();
+  } else if(scause == 15){
+    // store / AMO page fault
+    uint64 va = r_stval();
+    if (va >= MAXVA ||
+        cowpage(p->pagetable, va) != 0 || // not a cow page
+        cowalloc(p->pagetable, va) == 0) { // or is a cow page but fail to alloc a new page
+      setkilled(p);
+    }
   } else if((which_dev = devintr()) != 0){
     // ok
   } else {
@@ -138,7 +147,7 @@ kerneltrap()
   uint64 sepc = r_sepc();
   uint64 sstatus = r_sstatus();
   uint64 scause = r_scause();
-  
+
   if((sstatus & SSTATUS_SPP) == 0)
     panic("kerneltrap: not from supervisor mode");
   if(intr_get() != 0)

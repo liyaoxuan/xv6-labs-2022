@@ -308,7 +308,6 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-  char *mem;
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
@@ -317,18 +316,29 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
       panic("uvmcopy: page not present");
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
-      goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
+    if (flags & PTE_W) {
+      flags &= ~PTE_W;
+      flags |= PTE_COW;
+      *pte = PA2PTE(pa) | flags;
+    }
+    if(mappages(new, i, PGSIZE, pa, flags) != 0){
       goto err;
     }
+    kincref((void *)pa);
   }
   return 0;
 
  err:
   uvmunmap(new, 0, i / PGSIZE, 1);
+  // clear COW for old pages
+  for(; i >= 0; i -= PGSIZE) {
+    if((pte = walk(old, i, 0)) == 0)
+      panic("uvmcopy: pte should exist");
+    if((*pte & PTE_V) == 0)
+      panic("uvmcopy: page not present");
+    if (*pte & PTE_COW)
+      *pte = (*pte | PTE_W) & ~PTE_COW;
+  }
   return -1;
 }
 
@@ -357,6 +367,9 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
     va0 = PGROUNDDOWN(dstva);
     pa0 = walkaddr(pagetable, va0);
     if(pa0 == 0)
+      return -1;
+    if(cowpage(pagetable, va0)  == 0 && // is cow page
+      (pa0 = cowalloc(pagetable, va0)) == 0) // and fail to alloc new page
       return -1;
     n = PGSIZE - (dstva - va0);
     if(n > len)
@@ -436,4 +449,52 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
+}
+
+int
+cowpage(pagetable_t pagetable, uint64 va)
+{
+  pte_t *pte;
+  
+  pte = walk(pagetable, va, 0);
+  if (!pte || !(*pte & PTE_V) || !(*pte & PTE_COW)) {
+    return -1;
+  }
+  return 0;
+}
+
+// process cow page
+// reset COW flag if there is only one ref left
+// or alloc a new physical page and remap
+// return physical address if success; else 0
+uint64
+cowalloc(pagetable_t pagetable, uint64 va)
+{
+  pte_t *pte;
+  uint64 pa;
+  char* mem;
+
+  pte = walk(pagetable, va, 0);
+  pa = PTE2PA(*pte);
+  
+  if(kgetref((void *)pa) == 1){ // only one ref, clear COW flag and set W flag
+    *pte &= ~PTE_COW;
+    *pte |= PTE_W;
+    return pa;
+  }
+
+  if((mem = kalloc()) == 0) // no free mem
+    return 0;
+
+  memmove(mem, (char*)pa, PGSIZE);
+  uint flag = PTE_FLAGS(*pte);
+  flag &= ~PTE_COW;
+  flag |= PTE_W;
+  *pte &= ~PTE_V; // clear valid falg for remap
+  if (mappages(pagetable, PGROUNDDOWN(va), PGSIZE, (uint64)mem, flag) != 0) { // fail to map page
+    kfree(mem);
+    return 0;
+  }
+  kfree((void*)pa); // reduce ref of old pa by 1
+  return (uint64)mem;
 }
